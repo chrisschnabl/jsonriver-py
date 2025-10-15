@@ -1,0 +1,9 @@
+{
+  "name": "jsonriver-python-tests",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Test harness for Python jsonriver implementation",
+  "dependencies": {
+    "jsonriver": "^1.0.2"
+  }
+}

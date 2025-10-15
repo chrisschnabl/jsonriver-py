@@ -168,7 +168,13 @@ src/jsonriver/
 tests/
   test_parse.py     # Parser tests
   test_tokenize.py  # Tokenizer tests
+  test_cross_validate.py  # Cross-validation with TypeScript
   utils.py          # Test utilities
+
+bench/
+  python-bench.py   # Full file parsing benchmarks
+  streaming-bench.py # Streaming parsing benchmarks
+  README.md         # Benchmark results and analysis
 ```
 
 ## API Reference
@@ -217,14 +223,26 @@ JsonObject = dict[str, JsonValue]
 
 ## Performance
 
-jsonriver is designed for performance:
+jsonriver is optimized for **streaming scenarios**, not batch parsing:
 
-- Processes input synchronously in batches when available
-- Reuses objects and arrays to minimize allocations
-- Minimal overhead compared to standard `json.loads()`
-- Efficient state machine implementation
+- **Time-to-first-value**: 25x faster than json.loads when data arrives in chunks
+- **Progressive updates**: Provides 300+ incremental updates for large files
+- **User responsiveness**: Shows partial results immediately vs waiting for complete data
 
-In practice, jsonriver adds negligible overhead to the parsing process while providing valuable incremental updates.
+### Benchmarks
+
+```bash
+# Full file parsing comparison
+python bench/python-bench.py
+
+# Streaming scenario comparison
+python bench/streaming-bench.py
+```
+
+**Full file parsing**: `json.loads` is ~35x faster (expected, as it's C-based)
+**Streaming parsing**: jsonriver is ~25x faster to first value (the key advantage)
+
+See [bench/README.md](bench/README.md) for detailed benchmark results and analysis.
 
 ## Use Cases
 

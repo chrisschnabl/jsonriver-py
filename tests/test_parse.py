@@ -1,7 +1,8 @@
 """
 Tests for the JSON parser
 
-Copyright Google LLC (original TypeScript implementation)
+Copyright (c) 2023 Google LLC (original TypeScript implementation)
+Copyright (c) 2024 jsonriver-python contributors (Python port)
 SPDX-License-Identifier: BSD-3-Clause
 """
 

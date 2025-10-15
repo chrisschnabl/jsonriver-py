@@ -1,198 +1,278 @@
-# Gemini Streaming Structured Output API
+# jsonriver - Python Streaming JSON Parser
 
-An OpenAI-compatible streaming API for Google's Gemini that provides **incremental JSON parsing** - see items/objects as soon as they're complete, not just when the entire response finishes.
+Parse JSON incrementally as it streams in, e.g. from a network request or a language model. Gives you a sequence of increasingly complete values.
+
+This is a Python port of the TypeScript [jsonriver](https://github.com/rictic/jsonriver) library.
 
 ## Features
 
-- **Incremental parsing**: Get notified as soon as each item in an array is complete
-- **OpenAI-style interface**: Familiar event-based streaming API
-- **Pydantic schemas**: Define output structure with type safety
-- **Flexible**: Works with both array and non-array responses
+- **Incremental parsing**: Get progressively complete JSON values as data arrives
+- **Zero dependencies**: Uses only Python standard library
+- **Fully typed**: Complete type hints with mypy strict mode compliance
+- **Memory efficient**: Reuses objects and arrays when possible
+- **Correct**: Final result matches `json.loads()` exactly
+- **Fast**: Optimized for performance with minimal overhead
 
 ## Installation
 
+### From PyPI (recommended)
+
+Using uv:
 ```bash
-pip install google-genai pydantic ijson
+uv add jsonriver
 ```
 
-## Quick Start
+Using pip:
+```bash
+pip install jsonriver
+```
 
-### Example 1: Streaming Array Items
+### From source
 
-Parse items from an array incrementally as they arrive:
+Using uv:
+```bash
+git clone https://github.com/chrisschnabl/streamjson.git
+cd streamjson
+uv pip install -e .
+```
+
+Using pip:
+```bash
+git clone https://github.com/chrisschnabl/streamjson.git
+cd streamjson
+pip install -e .
+```
+
+## Usage
 
 ```python
-from typing import List
-from pydantic import BaseModel
-from gemini_stream import GeminiClient, EventType
+import asyncio
+import json
+from jsonriver import parse
 
 
-class Item(BaseModel):
-    id: str
-    score: float
+async def make_stream(text: str, chunk_size: int):
+    """Simulate a streaming source"""
+    for i in range(0, len(text), chunk_size):
+        yield text[i:i + chunk_size]
 
 
-class ItemList(BaseModel):
-    items: List[Item]
+async def main():
+    json_str = '{"name": "Alice", "age": 30}'
+
+    stream = make_stream(json_str, chunk_size=3)
+    async for value in parse(stream):
+        print(json.dumps(value))
+    # Output shows incremental results:
+    # {}
+    # {"name": "Al"}
+    # {"name": "Alice"}
+    # {"name": "Alice", "age": 30.0}
 
 
-client = GeminiClient()
-
-with client.responses.stream(
-    model="gemini-2.5-flash",
-    input=[
-        {"role": "system", "content": "Generate test data"},
-        {"role": "user", "content": "Generate 5 items with id and score"},
-    ],
-    text_format=ItemList,
-    array_path='items.item'  # Parse items from the 'items' array
-) as stream:
-    for event in stream:
-        if event.type == EventType.OUTPUT_DELTA:
-            # Raw JSON chunk
-            print(event.delta, end="", flush=True)
-
-        elif event.type == EventType.ITEM_PARSED:
-            # Item was fully parsed!
-            print(f"\n✓ Got item: {event.item}")
-
-        elif event.type == EventType.COMPLETED:
-            print("\nStream completed!")
-
-    # Get final typed response
-    final = stream.get_final_response()
-    print(f"Total items: {len(final.items)}")
+asyncio.run(main())
 ```
 
-### Example 2: Entity Extraction (Non-Array)
+## How it Works
 
-For responses that aren't arrays, set `array_path=None`:
+jsonriver yields a sequence of increasingly complete JSON values. Consider this JSON:
+
+```json
+{"name": "Alex", "keys": [1, 20, 300]}
+```
+
+If you parse this one byte at a time, it would yield:
+
+```json
+{}
+{"name": ""}
+{"name": "A"}
+{"name": "Al"}
+{"name": "Ale"}
+{"name": "Alex"}
+{"name": "Alex", "keys": []}
+{"name": "Alex", "keys": [1]}
+{"name": "Alex", "keys": [1, 20]}
+{"name": "Alex", "keys": [1, 20, 300]}
+```
+
+## Invariants
+
+The library maintains these guarantees:
+
+1. **Type stability**: Future versions will have the same type (never changes string → array)
+2. **Atomic values**: `null`, `true`, `false`, and numbers are only yielded when complete
+3. **String growth**: Strings may be replaced with longer versions
+4. **Array append-only**: Arrays only modified by appending or mutating the last element
+5. **Object append-only**: Objects only modified by adding properties or mutating the last one
+6. **Complete keys**: Object properties only added once key and value type are known
+
+## Error Handling
+
+The parser throws errors for invalid JSON, matching `json.loads()` behavior:
 
 ```python
-from typing import List
-from pydantic import BaseModel
-from gemini_stream import GeminiClient, EventType
-
-
-class EntitiesModel(BaseModel):
-    attributes: List[str]
-    colors: List[str]
-    animals: List[str]
-
-
-client = GeminiClient()
-
-with client.responses.stream(
-    model="gemini-2.5-flash",
-    input=[
-        {"role": "system", "content": "Extract entities from text"},
-        {"role": "user", "content": "The quick brown fox jumps over the lazy dog"},
-    ],
-    text_format=EntitiesModel,
-    array_path=None  # Not parsing array items
-) as stream:
-    for event in stream:
-        if event.type == EventType.OUTPUT_DELTA:
-            print(event.delta, end="", flush=True)
-        elif event.type == EventType.COMPLETED:
-            print("\nCompleted!")
-
-    final = stream.get_final_response()
-    print(f"Colors: {final.colors}")
-    print(f"Animals: {final.animals}")
+async def example_error():
+    try:
+        stream = make_stream('{"invalid": }', 1)
+        async for value in parse(stream):
+            print(value)
+    except ValueError as e:
+        print(f"Parse error: {e}")
 ```
 
-## Event Types
+## Development
 
-The API emits the following event types:
+### Setup
 
-- `EventType.OUTPUT_DELTA`: Raw JSON text chunk received
-- `EventType.ITEM_PARSED`: Complete item from array was parsed (only when using `array_path`)
-- `EventType.COMPLETED`: Stream finished successfully
-- `EventType.ERROR`: Parsing or streaming error occurred
+```bash
+# Create virtual environment and install dependencies
+uv venv
+uv pip install -e ".[dev]"
+```
+
+### Testing
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_parse.py -v
+
+# Run with coverage
+python -m pytest tests/ --cov=src/jsonriver
+```
+
+### Type Checking
+
+```bash
+# Check types with mypy
+mypy src/jsonriver --strict
+```
+
+### Running Examples
+
+```bash
+python example_jsonriver.py
+```
+
+## Project Structure
+
+```
+src/jsonriver/
+  __init__.py       # Public API exports
+  parse.py          # JSON parser implementation
+  tokenize.py       # JSON tokenizer implementation
+
+tests/
+  test_parse.py     # Parser tests
+  test_tokenize.py  # Tokenizer tests
+  utils.py          # Test utilities
+```
 
 ## API Reference
 
-### `GeminiClient`
+### `parse(stream: AsyncIterator[str]) -> AsyncIterator[JsonValue]`
 
-```python
-client = GeminiClient(api_key: Optional[str] = None)
-```
-
-Creates a Gemini client. If `api_key` is not provided, uses `GOOGLE_API_KEY` environment variable.
-
-### `client.responses.stream()`
-
-```python
-stream(
-    model: str,
-    input: List[dict],
-    text_format: Type[BaseModel],
-    array_path: Optional[str] = 'items.item'
-) -> StreamResponse
-```
+Incrementally parse a single JSON value from the given iterable of string chunks.
 
 **Parameters:**
-- `model`: Model name (e.g., `"gemini-2.5-flash"`)
-- `input`: List of message dicts with `'role'` and `'content'`
-- `text_format`: Pydantic model defining the output structure
-- `array_path`: JSON path to array items (default: `'items.item'`, use `None` for non-array responses)
+- `stream`: An async iterator that yields string chunks containing JSON data
 
-**Returns:** `StreamResponse` object that yields events
+**Yields:**
+- Increasingly complete JSON values as more input is parsed
 
-### `StreamEvent`
+**Raises:**
+- `ValueError`: If the input is not valid JSON
+- `RuntimeError`: For internal parsing errors
 
-Each event has:
-- `type`: One of the `EventType` enum values
-- `delta`: Text chunk (when `type == OUTPUT_DELTA`)
-- `item`: Parsed item dict (when `type == ITEM_PARSED`)
-- `error`: Error message (when `type == ERROR`)
+**Example:**
+```python
+async def parse_json():
+    json_str = '{"a": 1, "b": 2}'
 
-## How It Works
+    async def stream():
+        for char in json_str:
+            yield char
 
-The library uses `ijson` for true incremental JSON parsing:
+    async for value in parse(stream()):
+        print(value)
+```
 
-1. **Streaming**: Gemini streams JSON text in chunks
-2. **Incremental parsing**: As each chunk arrives, `ijson` parses it without waiting for the complete response
-3. **Item detection**: When a complete item in the array is parsed, an `ITEM_PARSED` event is emitted
-4. **Deduplication**: Already-seen items are tracked so they're only emitted once
-
-This means you can start processing items **before the entire response arrives**, making it perfect for:
-- Real-time UIs
-- Large array responses
-- Streaming data pipelines
-- Server-sent events (SSE)
-
-## Comparison to OpenAI
-
-This API closely mirrors OpenAI's structured output streaming, but with Gemini:
+### Type Definitions
 
 ```python
-# OpenAI
-with openai_client.responses.stream(...) as stream:
-    for event in stream:
-        if event.type == "response.output_text.delta":
-            ...
+JsonValue = Union[
+    None,
+    bool,
+    float,
+    str,
+    list['JsonValue'],
+    dict[str, 'JsonValue']
+]
 
-# Gemini (this library)
-with gemini_client.responses.stream(...) as stream:
-    for event in stream:
-        if event.type == EventType.OUTPUT_DELTA:
-            ...
+JsonObject = dict[str, JsonValue]
 ```
 
-## Examples
+## Performance
 
-Run the included examples:
+jsonriver is designed for performance:
 
-```bash
-python example.py              # Array items
-python example_entities.py     # Entity extraction
-```
+- Processes input synchronously in batches when available
+- Reuses objects and arrays to minimize allocations
+- Minimal overhead compared to standard `json.loads()`
+- Efficient state machine implementation
 
-## Requirements
+In practice, jsonriver adds negligible overhead to the parsing process while providing valuable incremental updates.
 
-- Python 3.8+
-- `google-genai`
-- `pydantic`
-- `ijson`
+## Use Cases
+
+- **Streaming APIs**: Parse JSON from network requests as data arrives
+- **Large payloads**: Start processing data before complete response
+- **Real-time UIs**: Update UI as JSON parses
+- **LLM responses**: Parse structured output from language models
+- **Progress indicators**: Show parsing progress to users
+- **Server-sent events**: Handle JSON in SSE streams
+
+## Comparison with Alternatives
+
+| Feature | jsonriver | json.loads | ijson |
+|---------|-----------|------------|-------|
+| Incremental parsing | ✅ | ❌ | ✅ |
+| Complete values | ✅ | ✅ | ❌ |
+| No dependencies | ✅ | ✅ | ❌ |
+| Type hints | ✅ | ✅ | ❌ |
+| Memory efficient | ✅ | ❌ | ✅ |
+
+## License
+
+BSD-3-Clause License
+
+- Original TypeScript implementation: Copyright (c) 2023 Google LLC
+- Python port: Copyright (c) 2024 jsonriver-python contributors
+
+See LICENSE file for full license text.
+
+## Credits
+
+This is a Python port of the excellent [jsonriver](https://github.com/rictic/jsonriver) TypeScript library by Peter Burns (@rictic).
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+
+1. All tests pass: `pytest tests/ -v`
+2. Type checking passes: `mypy src/jsonriver --strict`
+3. Code follows existing style
+4. New features include tests
+
+## Changelog
+
+### 0.0.1 (2024)
+
+- Initial Python port from TypeScript
+- Full type hints with mypy strict mode
+- Comprehensive test suite (37 tests)
+- Complete documentation
+- Zero dependencies

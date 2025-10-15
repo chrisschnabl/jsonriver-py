@@ -1,0 +1,33 @@
+include LICENSE
+include README.md
+include pyproject.toml
+
+recursive-include src *.py
+recursive-include tests *.py
+
+# Exclude development and build files
+exclude test_bridge.mjs
+exclude package.json
+exclude package-lock.json
+exclude example_jsonriver.py
+exclude VALIDATION_REPORT.md
+exclude PUBLISHING.md
+exclude .gitignore
+
+# Exclude directories
+prune node_modules
+prune .github
+prune .claude
+prune dist
+prune build
+prune __pycache__
+prune .pytest_cache
+prune .mypy_cache
+
+# Exclude patterns
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude .DS_Store
+global-exclude *.swp
+global-exclude *.swo
